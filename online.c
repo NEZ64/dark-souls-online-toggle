@@ -18,6 +18,15 @@ DWORD  offsetFPS = 0xB4C;
 DWORD  versionAddress = 0x400080;
 int    versionOffset = 0;
 
+enum {
+    CANT_ENUM_PROCESSES = -2,
+    INVALID_HANDLE = -1,
+    DS_NOT_FOUND = 0,
+    DS_FOUND = 1,
+    ONLINE = 1,
+    OFFLINE = 2,
+};
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                    LPSTR lpCmdLine, int nCmdShow)
 {
@@ -41,34 +50,34 @@ BOOL CALLBACK DlgProc(HWND hwnd, UINT Message, WPARAM wParam, LPARAM lParam)
 	switch (LOWORD(wParam)) {
       	case IDC_REFRESH:
 	    status = ReadStatus(hwnd);
-	    if (status == 2)
+	    if (status == OFFLINE)
 		SetDlgItemText(hwnd, IDT_INFO, "Status: OFFLINE");
-	    else if (status == 1)
+	    else if (status == ONLINE)
 		SetDlgItemText(hwnd, IDT_INFO, "Status: ONLINE");
-	    else if (status == 0) {
+	    else if (status == DS_NOT_FOUND) {
 		SetDlgItemText(hwnd, IDT_INFO, "Dark Souls not found!");
 		SetDlgItemText(hwnd, IDT_VERSION, "Online Toggle");
-	    } else if (status < 0)
+	    } else if (status < DS_NOT_FOUND)
 		SetDlgItemText(hwnd, IDT_INFO, "Error finding process!");
 	    break;
 	case IDC_TOGGLEON:
 	    try_write = WriteBytes(hwnd, 1, 0);
-	    if (try_write == 1)
+	    if (try_write == DS_FOUND)
 		SetDlgItemText(hwnd, IDT_INFO, "Status: ONLINE");
-	    else if (try_write == 0) {
+	    else if (try_write == DS_NOT_FOUND) {
 		SetDlgItemText(hwnd, IDT_INFO, "Dark Souls not found!");
 		SetDlgItemText(hwnd, IDT_VERSION, "Online Toggle");
-	    } else if (try_write < 0)
+	    } else if (try_write < DS_NOT_FOUND)
 		SetDlgItemText(hwnd, IDT_INFO, "Error finding process!");
 	    break;
 	case IDC_TOGGLEOFF:
     	    try_write = WriteBytes(hwnd, 0, 1);
-	    if (try_write == 1)
+	    if (try_write == DS_FOUND)
 		SetDlgItemText(hwnd, IDT_INFO, "Status: OFFLINE");
-	    else if (try_write == 0) {
+	    else if (try_write == DS_NOT_FOUND) {
 		SetDlgItemText(hwnd, IDT_INFO, "Dark Souls not found!");
 		SetDlgItemText(hwnd, IDT_VERSION, "Online Toggle");
-	    } else if (try_write < 0)
+	    } else if (try_write < DS_NOT_FOUND)
 		SetDlgItemText(hwnd, IDT_INFO, "Error finding process!");
 	    break;
 	}
@@ -91,32 +100,32 @@ int GetProcess(void)
     hProcessSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hProcessSnap == INVALID_HANDLE_VALUE) {
         CloseHandle(hProcessSnap);
-        return -1;
+        return INVALID_HANDLE;
     }
 
     pe32.dwSize = sizeof(PROCESSENTRY32);
 
     if (!Process32First(hProcessSnap, &pe32)) {
         CloseHandle(hProcessSnap);
-        return -2;
+        return CANT_ENUM_PROCESSES;
     }
 
     do {
         if (_stricmp(pe32.szExeFile, "DARKSOULS.exe") == 0) {
             pid = pe32.th32ProcessID;
             CloseHandle(hProcessSnap);
-            return 1;
+            return DS_FOUND;
         }
     } while (Process32Next(hProcessSnap, &pe32));
 
     CloseHandle(hProcessSnap);
-    return 0;
+    return DS_NOT_FOUND;
 }
 
 int ReadStatus(HWND hwnd)
 {
     int isopen = GetProcess();
-    if (isopen > 0) {
+    if (isopen == DS_FOUND) {
         GetDSVersion(hwnd);
         int online = 0;
         void *tmpPtr;
@@ -124,7 +133,7 @@ int ReadStatus(HWND hwnd)
         ReadProcessMemory(proc, (void*) (baseAddress + versionOffset), &tmpPtr, 4, NULL);
         ReadProcessMemory(proc, tmpPtr+offsetOnline, &online, 1, NULL);
         CloseHandle(proc);
-        return (online) ? 1 : 2;
+        return (online) ? ONLINE : OFFLINE;
     } else
         return isopen;
 }
@@ -133,7 +142,7 @@ int WriteBytes(HWND hwnd, int online, int fps)
 {
 
     int isopen = GetProcess();
-    if (isopen > 0) {
+    if (isopen == DS_FOUND) {
         GetDSVersion(hwnd);
         void *tmpPtr;
         proc = OpenProcess(access, FALSE, pid);
@@ -141,7 +150,7 @@ int WriteBytes(HWND hwnd, int online, int fps)
         WriteProcessMemory(proc, tmpPtr+offsetOnline, &online, 1, NULL);
         WriteProcessMemory(proc, tmpPtr+offsetFPS, &fps, 1, NULL);
         CloseHandle(proc);
-        return 1;
+        return DS_FOUND;
     } else
         return isopen;
 }
